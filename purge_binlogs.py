@@ -25,12 +25,12 @@ def get_slaves_connected():
     cursor = master_conn.cursor(mysql.cursors.DictCursor)
     cursor.execute("SHOW PROCESSLIST")
     result_set = cursor.fetchall()
-    #print result_set
     slave_hosts = []
     for row in result_set:
         if row["Command"].lower() == "binlog dump":
             slave_hosts.append(row["Host"].split(":")[0])
-    print slave_hosts
+    return slave_hosts
+
 
 
 get_slaves_connected()
