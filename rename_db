@@ -1,0 +1,219 @@
+#!/usr/bin/env python
+
+""" This is a script to rename database in MySQL.
+Takes argument as current database name and new database name.
+"""
+
+import MySQLdb as mysql
+import argparse
+import subprocess
+import sys
+import os
+from warnings import filterwarnings
+
+""" Option parser as expected."""
+def parse_options():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-o", "--original-db", dest="orig_db", required=True,
+                        help="Specify the name of the DB you want to rename.")
+    parser.add_argument("-n", "--new-db", dest="new_db", required=True,
+                        help="Specify the name of the DB you want to rename to.")
+    parser.add_argument("-H", "--host", dest="host", default="localhost",
+                        help="Specify the hostname on which to execute rename database.")
+    parser.add_argument("-P", "--port", dest="port", default=3306,
+                        help="Specify the MySQL port to connect to.")
+
+    if len(sys.argv) == 1:
+        parser.print_help()
+        sys.exit(1)
+    return parser.parse_args()
+
+"""Global mysql connection method"""
+def get_mysql_conn(host, port_no, sql):
+    conn = mysql.connect(host = host, port = port_no, read_default_group = 'client', read_default_file = '~/.my.cnf')
+    filterwarnings('ignore', category = mysql.Warning)
+    cursor = conn.cursor(mysql.cursors.DictCursor)
+    cursor.execute(sql)
+    result = cursor.fetchall()
+    conn.close()
+    return result
+
+""" Method to check if New DB already exists """
+def db_exists(n_db, host, port):
+    sql = "SHOW DATABASES LIKE '%s'" % n_db
+    return get_mysql_conn(host, port, sql)
+
+""" We need the charset for new DB, so we use this method."""
+def get_charset(o_db, host, port):
+    sql = "SELECT DEFAULT_CHARACTER_SET_NAME FROM INFORMATION_SCHEMA.SCHEMATA WHERE SCHEMA_NAME='%s'" % o_db
+    charset = get_mysql_conn(host, port, sql)[0]['DEFAULT_CHARACTER_SET_NAME']
+    return charset
+
+""" Ofcourse the list of tables to move to new schema """
+def get_tables(o_db, host, port):
+    table_list = []
+    sql = "SELECT TABLE_NAME FROM information_schema.tables WHERE table_schema='%s' AND TABLE_TYPE='BASE TABLE'" % o_db
+    results = get_mysql_conn(host, port, sql)
+    for table in results:
+        table_list.append(table['TABLE_NAME'])
+    return table_list
+
+""" Creating the new DB """
+def create_db(n_db, o_db, host, port):
+    charset = get_charset(o_db, host, port)
+    sql = "CREATE DATABASE %s DEFAULT CHARACTER SET %s" % (n_db, charset)
+    try:
+        get_mysql_conn(host, port, sql)
+    except mysql.Error, e:
+        print "Error encountered while creating new database %s" % e
+
+""" Method to get the list of Triggers."""
+def get_triggers(o_db, host, port):
+    trigger_list = []
+    sql = "SELECT TRIGGER_NAME FROM INFORMATION_SCHEMA.TRIGGERS WHERE TRIGGER_SCHEMA='%s'" % o_db
+    try:
+        results = get_mysql_conn(host, port, sql)
+        for trigger in results:
+            trigger_list.append(trigger['TRIGGER_NAME'])
+    except mysql.Error, e:
+        print "Error encountered while retrieving list of triggers %s" % e
+    return trigger_list
+
+""" Similarly, method to get the list of Views. """
+def get_views(o_db, host, port):
+    views_list = []
+    sql = "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = '%s' and TABLE_TYPE = 'VIEW'" % o_db
+    try:
+        results = get_mysql_conn(host, port, sql)
+        for views in results:
+            views_list.append(views['TABLE_NAME'])
+    except mysql.Error, e:
+        print "Error encountered while retrieving list of views %s" % e
+    return views_list
+
+""" Dump the triggers using mysqldump."""
+def dump_triggers(o_db, host, port):
+    trigs = get_triggers(o_db, host, port)
+    dump_file = 'trigger-dump-%s.sql' % o_db
+    if len(trigs) > 0:
+        trig_out_file = open(dump_file, 'w')
+        cmd = ['/usr/bin/mysqldump', '-d', '-R', '-E', '-t',
+               '-h%s' % host,
+               '-P%d' % port,
+               '%s' % o_db]
+        dump_proc = subprocess.Popen(cmd, stdout=trig_out_file, stderr=subprocess.STDOUT)
+        print "Dumping Triggers in a backup file."
+        dump_proc.communicate()
+        if dump_proc.returncode == 0:
+            print "Dump of Triggers succeeded."
+            return os.path.join(os.path.dirname(dump_file), os.path.basename(dump_file))
+        else:
+            print "Dump failed."
+    else:
+        print "No triggers to dump."
+
+""" Dump the Views using mysqldump. """
+def dump_views(o_db, host, port):
+    views = get_views(o_db, host, port)
+    dump_file = 'views-dump-%s.sql' % o_db
+    if len(views) > 0:
+        views_out_file = open(dump_file, 'w')
+        cmd = ['/usr/bin/mysqldump', '-h%s' % host, '-P%d' % port,
+               '%s' % o_db]
+        for view in views:
+            cmd.append(view)
+        dump_proc = subprocess.Popen(cmd, stdout=views_out_file, stderr=subprocess.STDOUT)
+        print "Dumping Views in a backup file."
+        dump_proc.communicate()
+        if dump_proc.returncode == 0:
+            print "Dump of Views succeeded."
+            return os.path.join(os.path.dirname(dump_file), os.path.basename(dump_file))
+        else:
+            print "Dump failed."
+    else:
+        print "No Views to dump."
+
+""" We need the grants too. Although we will just print the statements and not execute them. """
+def get_grants(o_db, n_db, host, port):
+    col_sql = "SELECT COUNT(*) FROM mysql.columns_priv WHERE db='%s'" % o_db
+    proc_sql = "SELECT COUNT(*) FROM mysql.procs_priv WHERE db='%s'" % o_db
+    tab_sql = "SELECT COUNT(*) FROM mysql.tables_priv WHERE db='%s'" % o_db
+    db_sql = "SELECT COUNT(*) FROM mysql.db WHERE db='%s'" % o_db
+    if get_mysql_conn(host, port, col_sql)[0]['COUNT(*)'] > 0:
+        print "UPDATE mysql.columns_priv SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+    if get_mysql_conn(host, port, proc_sql)[0]['COUNT(*)'] > 0:
+        print "UPDATE mysql.procs_priv SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+    if get_mysql_conn(host, port, tab_sql)[0]['COUNT(*)'] > 0:
+        print "UPDATE mysql.tables_priv SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+    if get_mysql_conn(host, port, db_sql)[0]['COUNT(*)'] > 0:
+        print "UPDATE mysql.db SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+
+""" Main method. Here we do everything. """
+def main():
+    options = parse_options()
+    # First we will check if the New DB already exists
+    if len(db_exists(options.new_db, options.host, options.port)) == 0:
+        # Lets start with creating the new schema.
+        create_db(options.new_db, options.orig_db, options.host, options.port)
+
+        # Get the dump file location for Views and Triggers.
+        views_dump = dump_views(options.orig_db, options.host, options.port)
+        trig_dump = dump_triggers(options.orig_db, options.host, options.port)
+
+        for trig in get_triggers(options.orig_db, options.host, options.port):
+            sql = "DROP TRIGGER %s.%s" % (options.orig_db, trig)
+            print "Dropping trigger %s.%s" % (options.orig_db, trig)
+            try:
+                get_mysql_conn(options.host, options.port, sql)
+            except mysql.Error, e:
+                print "An error occured, %s" % e
+
+        # Now lets rename the tables
+        for table in get_tables(options.orig_db, options.host, options.port):
+            fk_sql = "SET FOREIGN_KEY_CHECKS=0"
+            sql = "RENAME TABLE %s.%s TO %s.%s" % (options.orig_db,table,options.new_db,table)
+            print sql
+            try:
+                get_mysql_conn(options.host, options.port, fk_sql)
+                get_mysql_conn(options.host, options.port, sql)
+            except mysql.Error, e:
+                print "An error occurred while renaming tables %s" % e
+
+        # Lets load the views
+        load_views = subprocess.Popen(['/usr/bin/mysql',
+                                       '-h%s' % options.host,
+                                       '-P%s' % options.port,
+                                       '%s' % options.new_db], stdin=subprocess.PIPE, shell=False)
+        load_views.communicate("source %s" % views_dump)
+        if load_views.returncode == 0:
+            print "Imported views successfully in the schema %s." % options.new_db
+        else:
+            print "An error occurred while importing views."
+
+        # Lets load the triggers.
+        load_trigs = subprocess.Popen(['/usr/bin/mysql',
+                                       '-h%s' % options.host,
+                                       '-P%s' % options.port,
+                                       '%s' % options.new_db], stdin=subprocess.PIPE, shell=False)
+        load_trigs.communicate("source %s" % trig_dump)
+        if load_trigs.returncode == 0:
+            print "Imported triggers successfully in the schema %s." % options.new_db
+        else:
+            print "An error occurred while importing triggers."
+
+        # Check if there are any tables left in the old schema, if no execute DROP DATABASE
+        if len(get_tables(options.orig_db, options.host, options.port)) == 0:
+            sql = "DROP DATABASE %s" % options.orig_db
+            try:
+                get_mysql_conn(options.host, options.port, sql)
+            except mysql.Error, e:
+                print "An error occurred while Dropping Old DB %s" % e
+
+        # Lets get the GRANTS backup.
+        get_grants(options.orig_db, options.new_db, options.host, options.port)
+    else:
+        print "Schema with new name already exist, Please verify."
+
+
+if __name__ == '__main__':
+    main()
