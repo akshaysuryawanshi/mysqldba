@@ -140,11 +140,11 @@ def get_grants(o_db, n_db, host, port):
     tab_sql = "SELECT COUNT(*) FROM mysql.tables_priv WHERE db='%s'" % o_db
     db_sql = "SELECT COUNT(*) FROM mysql.db WHERE db='%s'" % o_db
     if get_mysql_conn(host, port, col_sql)[0]['COUNT(*)'] > 0:
-        print "UPDATE mysql.columns_priv SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+        print "UPDATE mysql.columns_priv SET db='%s' WHERE db='%s';" % (n_db, o_db)
     if get_mysql_conn(host, port, proc_sql)[0]['COUNT(*)'] > 0:
-        print "UPDATE mysql.procs_priv SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+        print "UPDATE mysql.procs_priv SET db='%s' WHERE db='%s';" % (n_db, o_db)
     if get_mysql_conn(host, port, tab_sql)[0]['COUNT(*)'] > 0:
-        print "UPDATE mysql.tables_priv SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+        print "UPDATE mysql.tables_priv SET db='%s' WHERE db='%s';" % (n_db, o_db)
     if get_mysql_conn(host, port, db_sql)[0]['COUNT(*)'] > 0:
         print "UPDATE mysql.db SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
 
@@ -180,32 +180,39 @@ def main():
                 print "An error occurred while renaming tables %s" % e
 
         # Lets load the views
-        load_views = subprocess.Popen(['/usr/bin/mysql',
-                                       '-h%s' % options.host,
-                                       '-P%s' % options.port,
-                                       '%s' % options.new_db], stdin=subprocess.PIPE, shell=False)
-        load_views.communicate("source %s" % views_dump)
-        if load_views.returncode == 0:
-            print "Imported views successfully in the schema %s." % options.new_db
+        if views_dump is not None:
+            load_views = subprocess.Popen(['/usr/bin/mysql',
+                                           '-h%s' % options.host,
+                                           '-P%s' % options.port,
+                                           '%s' % options.new_db], stdin=subprocess.PIPE, shell=False)
+            load_views.communicate("source %s" % views_dump)
+            if load_views.returncode == 0:
+                print "Imported views successfully in the schema %s." % options.new_db
+            else:
+                print "An error occurred while importing views."
         else:
-            print "An error occurred while importing views."
+            print "No views to import."
 
         # Lets load the triggers.
-        load_trigs = subprocess.Popen(['/usr/bin/mysql',
-                                       '-h%s' % options.host,
-                                       '-P%s' % options.port,
-                                       '%s' % options.new_db], stdin=subprocess.PIPE, shell=False)
-        load_trigs.communicate("source %s" % trig_dump)
-        if load_trigs.returncode == 0:
-            print "Imported triggers successfully in the schema %s." % options.new_db
+        if trig_dump is not None:
+            load_trigs = subprocess.Popen(['/usr/bin/mysql',
+                                           '-h%s' % options.host,
+                                           '-P%s' % options.port,
+                                           '%s' % options.new_db], stdin=subprocess.PIPE, shell=False)
+            load_trigs.communicate("source %s" % trig_dump)
+            if load_trigs.returncode == 0:
+                print "Imported triggers successfully in the schema %s." % options.new_db
+            else:
+                print "An error occurred while importing triggers."
         else:
-            print "An error occurred while importing triggers."
+            print "No stored routines to import."
 
         # Check if there are any tables left in the old schema, if no execute DROP DATABASE
         if len(get_tables(options.orig_db, options.host, options.port)) == 0:
             sql = "DROP DATABASE %s" % options.orig_db
             try:
                 get_mysql_conn(options.host, options.port, sql)
+                print "Dropped the Original database schema."
             except mysql.Error, e:
                 print "An error occurred while Dropping Old DB %s" % e
 
