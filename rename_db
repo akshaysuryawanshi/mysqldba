@@ -133,6 +133,7 @@ def dump_views(o_db, host, port):
     else:
         print "No Views to dump."
 
+
 """ We need the grants too. Although we will just print the statements and not execute them. """
 def get_grants(o_db, n_db, host, port):
     col_sql = "SELECT COUNT(*) FROM mysql.columns_priv WHERE db='%s'" % o_db
@@ -147,6 +148,7 @@ def get_grants(o_db, n_db, host, port):
         print "UPDATE mysql.tables_priv SET db='%s' WHERE db='%s';" % (n_db, o_db)
     if get_mysql_conn(host, port, db_sql)[0]['COUNT(*)'] > 0:
         print "UPDATE mysql.db SET db='%s' WHERE db='%s'\n" % (n_db, o_db)
+
 
 """ Main method. Here we do everything. """
 def main():
