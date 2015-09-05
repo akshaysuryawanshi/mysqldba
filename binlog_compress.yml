@@ -1,6 +1,0 @@
----
-  MINUTES_TO_COMPRESS: 10
-  MINUTES_TO_REMOVE: 30
-  BINLOG_DIR: /mnt/mysql/data
-  MASTER_HOST: localhost
-  SLAVES: 192.168.1.9,192.168.1.106
